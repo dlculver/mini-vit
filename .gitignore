@@ -10,4 +10,4 @@ wheels/
 .venv
 
 # datasets
-data/cifar*
+cifar-data/*
