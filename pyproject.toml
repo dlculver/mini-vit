@@ -5,6 +5,8 @@ description = "small ViT model"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "einops>=0.8.1",
+    "pillow>=11.2.1",
     "rich>=14.0.0",
     "torch>=2.7.0",
     "torchvision>=0.22.0",
@@ -22,5 +24,9 @@ build-backend = "setuptools.build_meta"
 dev = [
     "ipykernel>=6.29.5",
     "jupyter>=1.1.1",
+    "matplotlib>=3.10.3",
     "pytest>=8.3.5",
 ]
+
+[tool.ruff.format]
+exclude = ["*.ipynb"]
