@@ -69,9 +69,32 @@ class PatchEmbedding(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
+    """Multi-head attention mechanism that allows the model to jointly attend to information
+    from different representation subspaces at different positions.
+
+    This implementation splits the input into multiple heads, computes scaled dot-product
+    attention for each head independently, and then concatenates the results and projects
+    them through a final linear layer.
+
+    Attributes:
+        d_out (int): Output dimension of the model
+        head_dim (int): Dimension of each attention head
+        num_heads (int): Number of parallel attention heads
+        qkv_bias (bool): Whether to include bias in the query, key, value projections
+    """
+
     def __init__(
         self, d_in: int, d_out: int, dropout: float, num_heads: int, qkv_bias: bool
     ):
+        """Initialize the Multi-Head Attention module.
+
+        Args:
+            d_in (int): Input dimension
+            d_out (int): Output dimension
+            dropout (float): Dropout probability
+            num_heads (int): Number of attention heads
+            qkv_bias (bool): Whether to include bias in QKV projections
+        """
         super().__init__()
         assert d_out % num_heads == 0, (
             f"d_out must be divisible by num_heads: {d_out} % {num_heads} != 0"
@@ -88,7 +111,15 @@ class MultiHeadAttention(nn.Module):
         self.W_o = nn.Linear(d_out, d_out, bias=qkv_bias)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass of the multi-head attention module.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_patches, d_in)
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_patches, d_out)
+        """
         b, num_patches, d_in = x.shape
         keys = self.W_k(x)
         queries = self.W_q(x)
