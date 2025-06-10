@@ -147,3 +147,55 @@ class MultiHeadAttention(nn.Module):
         context_vector = context_vector.contiguous().view(b, num_patches, self.d_out)
 
         return self.W_o(context_vector)
+
+
+class MLP(nn.Module):
+    def __init__(self, dim_embed: int, mlp_factor: int):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(dim_embed, mlp_factor * dim_embed),
+            nn.GELU(approximate="tanh"),
+            nn.Linear(mlp_factor * dim_embed, dim_embed),
+        )
+
+    def forward(self, x: torch.Tensor):
+        return self.layers(x)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        dim_embed: int,
+        num_heads: int,
+        qkv_bias: bool,
+        mlp_factor: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        # TODO(dominic): Is this the correct normalized shape to use? Passing an int is interpreted in normalizing over the last dimension
+        # This makes sense, since you don't want to mix the patches together (we assume patches are meant to be iid??)
+        self.norm1 = nn.RMSNorm(dim_embed, eps=1e-6)
+        self.norm2 = nn.RMSNorm(dim_embed, eps=1e-6)
+
+        self.mha = MultiHeadAttention(
+            d_in=dim_embed,
+            d_out=dim_embed,
+            dropout=dropout,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+        )
+        self.mlp = MLP(dim_embed=dim_embed, mlp_factor=mlp_factor)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x: torch.Tensor):
+        shotcut = x
+        x = self.norm1(x)
+        x = self.mha(x)
+        x = self.dropout(x)
+        x = x + shotcut
+
+        shortcut = x
+        x = self.norm2(x)
+        x = self.mlp(x)
+        x = self.dropout(x)
+        return x + shortcut
