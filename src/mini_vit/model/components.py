@@ -30,13 +30,11 @@ class PatchEmbedding(nn.Module):
         image_height, image_width = image_shape
 
         if not all(im % p == 0 for im, p in zip(image_shape, patch_shape)):
-            raise ValueError(
-                "Image dimensions must be divisible by patch size")
+            raise ValueError("Image dimensions must be divisible by patch size")
 
         self.patch_size = patch_shape
         self.projection_dim = projection_dim
-        self.num_patches = (image_height // patch_height) * \
-            (image_width // patch_width)
+        self.num_patches = (image_height // patch_height) * (image_width // patch_width)
 
         patch_dim = in_channels * patch_height * patch_width
         normalized_shape = [self.num_patches, patch_dim]
@@ -49,8 +47,7 @@ class PatchEmbedding(nn.Module):
             ),
             nn.RMSNorm(normalized_shape=normalized_shape, eps=1e-4),
             nn.Linear(patch_dim, projection_dim),
-            nn.RMSNorm(normalized_shape=[
-                       self.num_patches, projection_dim], eps=1e-4),
+            nn.RMSNorm(normalized_shape=[self.num_patches, projection_dim], eps=1e-4),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -108,8 +105,7 @@ class MultiHeadAttention(nn.Module):
         values = values.transpose(1, 2)
 
         attn_scores = queries @ keys.transpose(2, 3)
-        attn_weights = torch.softmax(
-            attn_scores / torch.sqrt(keys.shape[-1]), dim=-1)
+        attn_weights = torch.softmax(attn_scores / keys.shape[-1] ** 0.5, dim=-1)
         attn_weights = self.dropout(attn_weights)
 
         context_vector = (attn_weights @ values).transpose(
