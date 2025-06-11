@@ -30,3 +30,10 @@ dev = [
 
 [tool.ruff]
 exclude = ["*.ipynb"]
+
+[tool.pytest.ini_options]
+markers = [
+  "unit: Marks tests as unit tests",
+  "integration: Marks tests as integration tests",
+  "slow: Marks tests that are slow",
+]

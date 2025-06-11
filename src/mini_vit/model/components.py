@@ -3,7 +3,14 @@
 import torch
 import torch.nn as nn
 from einops.layers.torch import Rearrange
+from einops import repeat
 from typing import Tuple
+
+
+def get_shape(t: int | tuple[int, int]):
+    if isinstance(t, tuple):
+        return t
+    return (t, t)
 
 
 class PatchEmbedding(nn.Module):
@@ -37,7 +44,6 @@ class PatchEmbedding(nn.Module):
         self.num_patches = (image_height // patch_height) * (image_width // patch_width)
 
         patch_dim = in_channels * patch_height * patch_width
-        normalized_shape = [self.num_patches, patch_dim]
 
         self.layers = nn.Sequential(
             Rearrange(
@@ -45,9 +51,9 @@ class PatchEmbedding(nn.Module):
                 p1=patch_height,
                 p2=patch_width,
             ),
-            nn.RMSNorm(normalized_shape=normalized_shape, eps=1e-4),
+            nn.RMSNorm(normalized_shape=patch_dim, eps=1e-4),
             nn.Linear(patch_dim, projection_dim),
-            nn.RMSNorm(normalized_shape=[self.num_patches, projection_dim], eps=1e-4),
+            nn.RMSNorm(normalized_shape=projection_dim, eps=1e-4),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -135,8 +141,8 @@ class MultiHeadAttention(nn.Module):
         queries = queries.transpose(1, 2)
         values = values.transpose(1, 2)
 
-        attn_scores = queries @ keys.transpose(2, 3)
-        attn_weights = torch.softmax(attn_scores / keys.shape[-1] ** 0.5, dim=-1)
+        attn_scores = queries @ keys.transpose(2, 3) / self.head_dim**0.5
+        attn_weights = torch.softmax(attn_scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
 
         context_vector = (attn_weights @ values).transpose(
@@ -188,14 +194,112 @@ class TransformerBlock(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x: torch.Tensor):
-        shotcut = x
+        shortcut = x
         x = self.norm1(x)
         x = self.mha(x)
         x = self.dropout(x)
-        x = x + shotcut
+        x = x + shortcut
 
         shortcut = x
         x = self.norm2(x)
         x = self.mlp(x)
         x = self.dropout(x)
         return x + shortcut
+
+
+class TransformerEncoder(nn.Module):
+    def __init__(
+        self,
+        n_layers: int,
+        dim_embed: int,
+        num_heads: int,
+        qkv_bias: bool,
+        mlp_factor: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        self.transformer_blocks = nn.Sequential(
+            *[
+                TransformerBlock(
+                    dim_embed=dim_embed,
+                    num_heads=num_heads,
+                    qkv_bias=qkv_bias,
+                    mlp_factor=mlp_factor,
+                    dropout=dropout,
+                )
+                for _ in range(n_layers)
+            ]
+        )
+
+    def forward(self, x: torch.Tensor):
+        return self.transformer_blocks(x)
+
+
+class VisionTransformer(nn.Module):
+    def __init__(
+        self,
+        image_shape: tuple[int, int] | int,
+        patch_shape: tuple[int, int] | int,
+        channels: int,
+        n_layers: int,
+        dim_embed: int,
+        num_heads: int,
+        num_classes: int,
+        qkv_bias: bool,
+        pool: str = "cls",
+        mlp_factor: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        img_height, img_width = get_shape(image_shape)
+        patch_height, patch_width = get_shape(patch_shape)
+
+        assert (img_height % patch_height == 0) and (img_width % patch_width == 0), (
+            "Image dimensions are not divisible by patch dimensions."
+        )
+
+        num_patches = (img_height // patch_height) * (img_width // patch_width)
+        patch_dim = channels * patch_height * patch_width
+        assert pool in {"cls", "mean"}, "pool type not an accepted type."
+
+        self.patch_emb = PatchEmbedding(
+            in_channels=channels,
+            patch_shape=get_shape(patch_shape),
+            image_shape=get_shape(image_shape),
+            projection_dim=dim_embed,
+        )
+
+        self.pos_emb = nn.Parameter(torch.randn(1, num_patches + 1, dim_embed))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim_embed))
+        self.dropout = nn.Dropout(p=dropout)
+
+        self.encoder = TransformerEncoder(
+            n_layers=n_layers,
+            dim_embed=dim_embed,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            mlp_factor=mlp_factor,
+            dropout=dropout,
+        )
+
+        self.pool = pool
+        self.mlp = MLP(dim_embed=dim_embed, mlp_factor=mlp_factor)
+        self.head = nn.Linear(dim_embed, num_classes)  # classification head
+
+    def forward(self, img: torch.Tensor):
+        x = self.patch_emb(img)
+        b, n, _ = x.shape
+
+        cls_token = repeat(self.cls_token, pattern="1 1 d -> b 1 d", b=b)
+        x = torch.cat((cls_token, x), dim=1)
+        x += self.pos_emb[:, : (n + 1)]
+        x = self.dropout(x)
+
+        x = self.encoder(x)
+
+        # pool
+        x = x.mean(dim=1) if self.pool == "mean" else x[:, 0]
+
+        x = self.mlp(x)
+        return self.head(x)
