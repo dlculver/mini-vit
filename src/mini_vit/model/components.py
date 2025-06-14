@@ -7,12 +7,6 @@ from einops import repeat
 from typing import Tuple
 
 
-def get_shape(t: int | tuple[int, int]):
-    if isinstance(t, tuple):
-        return t
-    return (t, t)
-
-
 class PatchEmbedding(nn.Module):
     """Transform input images into patch embeddings.
 
@@ -169,40 +163,73 @@ class MLP(nn.Module):
 
 
 class TransformerBlock(nn.Module):
+    """Transformer block that consists of multi-head self-attention and a feed-forward network.
+
+    This block applies layer normalization, multi-head attention, and a feed-forward network
+    with residual connections.
+
+    Attributes:
+        d_in (int): Input dimension
+        d_out (int): Output dimension
+        num_heads (int): Number of attention heads
+        ff_dim (int): Dimension of the feed-forward network
+        dropout (float): Dropout probability
+        qkv_bias (bool): Whether to include bias in QKV projections
+    """
+
     def __init__(
         self,
-        dim_embed: int,
+        d_in: int,
+        d_out: int,
         num_heads: int,
+        ff_dim: int,
+        dropout: float,
         qkv_bias: bool,
-        mlp_factor: int = 4,
-        dropout: float = 0.1,
     ):
+        """Initialize the Transformer block.
+
+        Args:
+            d_in (int): Input dimension
+            d_out (int): Output dimension
+            num_heads (int): Number of attention heads
+            ff_dim (int): Dimension of the feed-forward network
+            dropout (float): Dropout probability
+            qkv_bias (bool): Whether to include bias in QKV projections
+        """
         super().__init__()
-        # TODO(dominic): Is this the correct normalized shape to use? Passing an int is interpreted in normalizing over the last dimension
-        # This makes sense, since you don't want to mix the patches together (we assume patches are meant to be iid??)
-        self.norm1 = nn.RMSNorm(dim_embed, eps=1e-6)
-        self.norm2 = nn.RMSNorm(dim_embed, eps=1e-6)
-
-        self.mha = MultiHeadAttention(
-            d_in=dim_embed,
-            d_out=dim_embed,
-            dropout=dropout,
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
+        self.attention = MultiHeadAttention(
+            d_in=d_in, d_out=d_out, dropout=dropout, num_heads=num_heads, qkv_bias=qkv_bias
         )
-        self.mlp = MLP(dim_embed=dim_embed, mlp_factor=mlp_factor)
-        self.dropout = nn.Dropout(p=dropout)
+        self.ffn = nn.Sequential(
+            nn.Linear(d_in, ff_dim),
+            nn.ReLU(),
+            nn.Linear(ff_dim, d_out),
+            nn.Dropout(dropout),
+        )
 
-    def forward(self, x: torch.Tensor):
+        self.norm1 = nn.RMSNorm(normalized_shape=d_in, eps=1e-4)
+        self.norm2 = nn.RMSNorm(normalized_shape=d_in, eps=1e-4)
+
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass of the transformer block.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_patches, d_in)
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_patches, d_out)
+        """
         shortcut = x
         x = self.norm1(x)
-        x = self.mha(x)
+        x = self.attention(x)
         x = self.dropout(x)
         x = x + shortcut
 
         shortcut = x
         x = self.norm2(x)
-        x = self.mlp(x)
+        x = self.ffn(x)
         x = self.dropout(x)
         return x + shortcut
 
@@ -237,69 +264,133 @@ class TransformerEncoder(nn.Module):
 
 
 class VisionTransformer(nn.Module):
+    """
+    Transformer based mdoel for image classification.
+
+    Based on the the paper: https://arxiv.org/pdf/2010.11929
+
+    The model patches the input image into fixed-size patches, flattens each patch,
+    and passes these through an embedding layer. The resulting embeddings are passed
+    through a transformer based encoder, and the output of the encoder is passed through a
+    a classification head.
+
+    The implementation allows for two types of pooling:
+    1. CLS pooling: The first token of the transformer encoder is used as the representation
+       of the entire image.
+    2. Mean pooling: The mean of all tokens is used as the representation of the entire image.
+    In the former case, we add a learnable CLS token to the input sequence and concat it
+    with the patch embeddings. In the latter case, we simply take the mean of all tokens
+    in the sequence.
+
+    Attributes:
+    ----------
+        in_channels (int): Number of input channels
+        patch_shape (tuple[int, int]): Height and width of each patch
+        image_shape (tuple[int, int]): Height and width of the input image
+        embedding_dim (int): Dimension of the patch embeddings
+        num_heads (int): Number of attention heads
+        ff_dim (int): Dimension of the feed-forward network
+        dropout (float): Dropout probability
+        qkv_bias (bool): Whether to include bias in QKV projections
+        num_layers (int): Number of transformer blocks
+        num_classes (int): Number of output classes
+        pool (str): Pooling method ('cls' or 'mean')
+
+    """
+
     def __init__(
         self,
-        image_shape: tuple[int, int] | int,
-        patch_shape: tuple[int, int] | int,
-        channels: int,
-        n_layers: int,
-        dim_embed: int,
+        in_channels: int,
+        patch_shape: tuple[int, int],
+        image_shape: tuple[int, int],
+        embedding_dim: int,
         num_heads: int,
-        num_classes: int,
+        ff_dim: int,
+        dropout: float,
         qkv_bias: bool,
+        num_layers: int,
+        num_classes: int,
         pool: str = "cls",
-        mlp_factor: int = 4,
-        dropout: float = 0.1,
     ):
         super().__init__()
-        img_height, img_width = get_shape(image_shape)
-        patch_height, patch_width = get_shape(patch_shape)
 
-        assert (img_height % patch_height == 0) and (img_width % patch_width == 0), (
-            "Image dimensions are not divisible by patch dimensions."
+        patch_height, patch_width = patch_shape
+        image_height, image_width = image_shape
+        if not all(im % p == 0 for im, p in zip(image_shape, patch_shape)):
+            raise ValueError("Image dimensions must be divisible by patch size")
+        
+        self.num_patches = (image_height // patch_height) * (image_width // patch_width)
+
+        assert pool in ["cls", "mean"], f"pool must be one of ['cls', 'mean'], but got {pool}"
+        self.pool = pool
+    
+        # if using CLS pooling, create a CLS token "embedding"
+        if pool == "cls":
+            self.cls_token = nn.Parameter(torch.randn(1, 1, embedding_dim))
+            self.num_patches += 1
+        
+        self.pos_emb = nn.Parameter(
+            torch.randn(1, self.num_patches, embedding_dim)
         )
 
-        num_patches = (img_height // patch_height) * (img_width // patch_width)
-        patch_dim = channels * patch_height * patch_width
-        assert pool in {"cls", "mean"}, "pool type not an accepted type."
 
         self.patch_emb = PatchEmbedding(
-            in_channels=channels,
-            patch_shape=get_shape(patch_shape),
-            image_shape=get_shape(image_shape),
-            projection_dim=dim_embed,
+            in_channels=in_channels,
+            patch_shape=patch_shape,
+            image_shape=image_shape,
+            projection_dim=embedding_dim
         )
 
-        self.pos_emb = nn.Parameter(torch.randn(1, num_patches + 1, dim_embed))
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim_embed))
-        self.dropout = nn.Dropout(p=dropout)
-
-        self.encoder = TransformerEncoder(
-            n_layers=n_layers,
-            dim_embed=dim_embed,
+        self.transformer = TransformerEncoder(
+            d_in=embedding_dim,
+            d_out=embedding_dim,
             num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            mlp_factor=mlp_factor,
+            ff_dim=ff_dim,
             dropout=dropout,
+            qkv_bias=qkv_bias,
+            num_layers=num_layers
         )
+        self.dropout = nn.Dropout(dropout)
+        
+        self.mlp = nn.Sequential(
+            nn.Linear(embedding_dim, ff_dim),
+            nn.GELU(approximate="tanh"),
+            nn.Linear(ff_dim, num_classes),
+        )
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass of the Vision Transformer.
 
-        self.pool = pool
-        self.mlp = MLP(dim_embed=dim_embed, mlp_factor=mlp_factor)
-        self.head = nn.Linear(dim_embed, num_classes)  # classification head
+        Pass the tensor through the patch embedding layer, transformer encoder,
+        and classification head.
+        The input tensor is expected to have shape (batch_size, channels, height, width).
+        The output tensor will have shape (batch_size, num_classes).
 
-    def forward(self, img: torch.Tensor):
-        x = self.patch_emb(img)
-        b, n, _ = x.shape
+        If the pooling method is 'cls', the first token of the transformer encoder
+        is used as the representation of the entire image. In this case, we concatenate
+        the CLS token with the patch embeddings. If the pooling method is 'mean',
+        the mean of all tokens is used as the representation of the entire image.
+        The CLS token is learnable and is added to the input sequence.s
 
-        cls_token = repeat(self.cls_token, pattern="1 1 d -> b 1 d", b=b)
-        x = torch.cat((cls_token, x), dim=1)
-        x += self.pos_emb[:, : (n + 1)]
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, channels, height, width)
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_classes)
+        """
+        # x: b, c, h, w
+        x = self.patch_emb(x)
+        b, num_patches, _ = x.shape
+
+        # repeat the CLS token for each member of the batch if using CLS pooling
+        if self.pool == "cls":
+            cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=x.shape[0])
+            x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_emb
         x = self.dropout(x)
-
-        x = self.encoder(x)
-
-        # pool
-        x = x.mean(dim=1) if self.pool == "mean" else x[:, 0]
-
+        x = self.transformer(x)
+        x = x[:, 0] if self.pool == "cls" else x.mean(dim=1)
         x = self.mlp(x)
-        return self.head(x)
+        return x
+
+            
+ 
