@@ -7,6 +7,7 @@ from mini_vit.model.components import (
     PatchEmbedding,
     MultiHeadAttention,
     TransformerBlock,
+    TransformerEncoder,
 )
 
 
@@ -107,16 +108,17 @@ def test_multihead_attn_forward(batch_size, num_patches, d_in):
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "batch_size, num_patches, d_in, d_out, num_heads, ff_dim, dropout, qkv_bias, expected_shape",
+    "batch_size, num_patches, embed_dim, num_heads, ff_dim, dropout, qkv_bias, expected_shape",
     [
-        (1, 4, 64, 64, 8, 128, 0.1, False, torch.Size([1, 4, 64])),
+        (1, 4, 64, 8, 128, 0.1, False, torch.Size([1, 4, 64])),
+        (4, 8, 128, 8, 256, 0.1, False, torch.Size([4, 8, 128])),
+        (16, 8, 256, 8, 512, 0.1, False, torch.Size([16, 8, 256])),
     ],
 )
 def test_transformer_block_forward(
     batch_size,
     num_patches,
-    d_in,
-    d_out,
+    embed_dim,
     num_heads,
     ff_dim,
     dropout,
@@ -125,18 +127,56 @@ def test_transformer_block_forward(
 ):
     """Test forward pass of TransformerBlock."""
     block = TransformerBlock(
-        d_in=d_in,
-        d_out=d_out,
+        embed_dim=embed_dim,
         num_heads=num_heads,
         ff_dim=ff_dim,
         dropout=dropout,
         qkv_bias=qkv_bias,
     )
-    x = torch.randn(batch_size, num_patches, d_in)
+    x = torch.randn(batch_size, num_patches, embed_dim)
     output = block(x)
 
-    assert output.shape == x.shape
+    assert (
+        output.shape == expected_shape
+    )  # should be batch_size, num_patches, embed_dim
     # Output should be different from input
+    assert not torch.allclose(output, x)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "batch_size, num_patches, embed_dim, num_heads, ff_dim, dropout, qkv_bias, num_layers, expected_shape",
+    [
+        (1, 4, 64, 4, 128, 0.1, False, 6, torch.Size([1, 4, 64])),
+        (4, 8, 128, 4, 256, 0.1, False, 12, torch.Size([4, 8, 128])),
+        (8, 16, 256, 4, 512, 0.1, False, 24, torch.Size([8, 16, 256])),
+    ],
+)
+def test_transformer_encoder_forward(
+    batch_size,
+    num_patches,
+    embed_dim,
+    num_heads,
+    ff_dim,
+    dropout,
+    qkv_bias,
+    num_layers,
+    expected_shape,
+):
+    """Test forward pass of TransformerEncoder."""
+    encoder = TransformerEncoder(
+        embed_dim=embed_dim,
+        num_heads=num_heads,
+        ff_dim=ff_dim,
+        dropout=dropout,
+        qkv_bias=qkv_bias,
+        num_layers=num_layers,
+    )
+
+    x = torch.randn(batch_size, num_patches, embed_dim)
+    output = encoder(x)
+
+    assert output.shape == expected_shape
     assert not torch.allclose(output, x)
 
 

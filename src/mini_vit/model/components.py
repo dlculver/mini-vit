@@ -182,8 +182,7 @@ class TransformerBlock(nn.Module):
 
     def __init__(
         self,
-        d_in: int,
-        d_out: int,
+        embed_dim: int,
         num_heads: int,
         ff_dim: int,
         dropout: float,
@@ -201,21 +200,21 @@ class TransformerBlock(nn.Module):
         """
         super().__init__()
         self.attention = MultiHeadAttention(
-            d_in=d_in,
-            d_out=d_out,
+            d_in=embed_dim,
+            d_out=embed_dim,
             dropout=dropout,
             num_heads=num_heads,
             qkv_bias=qkv_bias,
         )
         self.ffn = nn.Sequential(
-            nn.Linear(d_in, ff_dim),
+            nn.Linear(embed_dim, ff_dim),
             nn.ReLU(),
-            nn.Linear(ff_dim, d_out),
+            nn.Linear(ff_dim, embed_dim),
             nn.Dropout(dropout),
         )
 
-        self.norm1 = nn.RMSNorm(normalized_shape=d_in, eps=1e-4)
-        self.norm2 = nn.RMSNorm(normalized_shape=d_in, eps=1e-4)
+        self.norm1 = nn.RMSNorm(normalized_shape=embed_dim, eps=1e-4)
+        self.norm2 = nn.RMSNorm(normalized_shape=embed_dim, eps=1e-4)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -260,8 +259,7 @@ class TransformerEncoder(nn.Module):
 
     def __init__(
         self,
-        d_in: int,
-        d_out: int,
+        embed_dim: int,
         num_heads: int,
         ff_dim: int,
         dropout: float,
@@ -270,8 +268,7 @@ class TransformerEncoder(nn.Module):
     ):
         """Initialize the Transformer encoder.
         Args:
-            d_in (int): Input dimension
-            d_out (int): Output dimension
+            embed_dim (int): Input dimension
             num_heads (int): Number of attention heads
             ff_dim (int): Dimension of the feed-forward network
             dropout (float): Dropout probability
@@ -282,8 +279,7 @@ class TransformerEncoder(nn.Module):
         self.layers = nn.ModuleList(
             [
                 TransformerBlock(
-                    d_in=d_in,
-                    d_out=d_out,
+                    embed_dim=embed_dim,
                     num_heads=num_heads,
                     ff_dim=ff_dim,
                     dropout=dropout,
