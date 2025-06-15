@@ -14,6 +14,7 @@ class PatchEmbedding(nn.Module):
     them into a specified embedding dimension. Each patch is processed independently.
 
     Attributes:
+        in_channels: int, the number of channels in the input
         patch_size: Tuple[int, int], the height and width of each patch
         num_patches: int, total number of patches for the input image
         projection_dim: int, the output dimension for each patch embedding
@@ -77,7 +78,9 @@ class MultiHeadAttention(nn.Module):
     them through a final linear layer.
 
     Attributes:
-        d_out (int): Output dimension of the model
+        d_in (int): Input dimension of the MHA
+        d_out (int): Output dimension of the MHA
+        dropout (float): dropout probability
         head_dim (int): Dimension of each attention head
         num_heads (int): Number of parallel attention heads
         qkv_bias (bool): Whether to include bias in the query, key, value projections
@@ -198,7 +201,11 @@ class TransformerBlock(nn.Module):
         """
         super().__init__()
         self.attention = MultiHeadAttention(
-            d_in=d_in, d_out=d_out, dropout=dropout, num_heads=num_heads, qkv_bias=qkv_bias
+            d_in=d_in,
+            d_out=d_out,
+            dropout=dropout,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
         )
         self.ffn = nn.Sequential(
             nn.Linear(d_in, ff_dim),
@@ -211,7 +218,7 @@ class TransformerBlock(nn.Module):
         self.norm2 = nn.RMSNorm(normalized_shape=d_in, eps=1e-4)
 
         self.dropout = nn.Dropout(dropout)
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass of the transformer block.
 
@@ -235,32 +242,68 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerEncoder(nn.Module):
+    """
+    Transformer based encoder which consists of multiple transformer blocks.
+
+    This module stacks multiple transformer blocks to create a deep NN.
+
+    Attributes:
+    ----------
+        d_int (int): input dimension
+        d_out (int): output dimension
+        num_heads (int): number of attention heads
+        ff_dim (int): dimension of the hidden feed-forward network
+        dropout (float): dropout probability
+        qkv_bias (bool): whether to include bias in QKV projections
+        num_layers (int): number of transformer blocks
+    """
+
     def __init__(
         self,
-        n_layers: int,
-        dim_embed: int,
+        d_in: int,
+        d_out: int,
         num_heads: int,
+        ff_dim: int,
+        dropout: float,
         qkv_bias: bool,
-        mlp_factor: int = 4,
-        dropout: float = 0.1,
+        num_layers: int,
     ):
+        """Initialize the Transformer encoder.
+        Args:
+            d_in (int): Input dimension
+            d_out (int): Output dimension
+            num_heads (int): Number of attention heads
+            ff_dim (int): Dimension of the feed-forward network
+            dropout (float): Dropout probability
+            qkv_bias (bool): Whether to include bias in QKV projections
+            num_layers (int): Number of transformer blocks
+        """
         super().__init__()
-
-        self.transformer_blocks = nn.Sequential(
-            *[
+        self.layers = nn.ModuleList(
+            [
                 TransformerBlock(
-                    dim_embed=dim_embed,
+                    d_in=d_in,
+                    d_out=d_out,
                     num_heads=num_heads,
-                    qkv_bias=qkv_bias,
-                    mlp_factor=mlp_factor,
+                    ff_dim=ff_dim,
                     dropout=dropout,
+                    qkv_bias=qkv_bias,
                 )
-                for _ in range(n_layers)
+                for _ in range(num_layers)
             ]
         )
 
-    def forward(self, x: torch.Tensor):
-        return self.transformer_blocks(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass of the transformer encoder.
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, num_patches, d_in)
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, num_patches, d_out)
+        """
+        # Pass the input through each transformer block
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 
 class VisionTransformer(nn.Module):
@@ -318,27 +361,26 @@ class VisionTransformer(nn.Module):
         image_height, image_width = image_shape
         if not all(im % p == 0 for im, p in zip(image_shape, patch_shape)):
             raise ValueError("Image dimensions must be divisible by patch size")
-        
+
         self.num_patches = (image_height // patch_height) * (image_width // patch_width)
 
-        assert pool in ["cls", "mean"], f"pool must be one of ['cls', 'mean'], but got {pool}"
+        assert pool in ["cls", "mean"], (
+            f"pool must be one of ['cls', 'mean'], but got {pool}"
+        )
         self.pool = pool
-    
+
         # if using CLS pooling, create a CLS token "embedding"
         if pool == "cls":
             self.cls_token = nn.Parameter(torch.randn(1, 1, embedding_dim))
             self.num_patches += 1
-        
-        self.pos_emb = nn.Parameter(
-            torch.randn(1, self.num_patches, embedding_dim)
-        )
 
+        self.pos_emb = nn.Parameter(torch.randn(1, self.num_patches, embedding_dim))
 
         self.patch_emb = PatchEmbedding(
             in_channels=in_channels,
             patch_shape=patch_shape,
             image_shape=image_shape,
-            projection_dim=embedding_dim
+            projection_dim=embedding_dim,
         )
 
         self.transformer = TransformerEncoder(
@@ -348,16 +390,16 @@ class VisionTransformer(nn.Module):
             ff_dim=ff_dim,
             dropout=dropout,
             qkv_bias=qkv_bias,
-            num_layers=num_layers
+            num_layers=num_layers,
         )
         self.dropout = nn.Dropout(dropout)
-        
+
         self.mlp = nn.Sequential(
             nn.Linear(embedding_dim, ff_dim),
             nn.GELU(approximate="tanh"),
             nn.Linear(ff_dim, num_classes),
         )
-        
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass of the Vision Transformer.
 
@@ -391,6 +433,3 @@ class VisionTransformer(nn.Module):
         x = x[:, 0] if self.pool == "cls" else x.mean(dim=1)
         x = self.mlp(x)
         return x
-
-            
- 
