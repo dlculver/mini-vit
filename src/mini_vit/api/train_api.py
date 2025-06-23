@@ -51,6 +51,13 @@ def setup_parser():
         default=64,
         help="Batch size for training (default: 64)",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        choices=["cpu", "cuda", "mps"],
+        default="mps" if torch.backends.mps.is_available() else "cpu",
+        help="Device to run the training on (default: mps if available, else cpu"
+    )
 
     parser.set_defaults(func=run_training)
     return parser
@@ -62,14 +69,14 @@ def run_training(args):
     # instantiate the model
     vit = VisionTransformer(
     in_channels=3,
-    patch_shape=(16, 16),
+    patch_shape=(8, 8),
     image_shape=(32, 32),
     embedding_dim=256,
     num_heads=8,
     ff_dim=512,
     dropout=0.1,
     qkv_bias=True,
-    num_layers=6,
+    num_layers=8,
     num_classes=10,
     pool="cls"
 )
@@ -102,6 +109,17 @@ def run_training(args):
     )
 
     logger.info("Data loaders for training and validation created.")
+
+    # start training
+    train(
+        model=vit,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=torch.nn.CrossEntropyLoss(),
+        device=args.device,
+        epochs=args.epochs,
+        learning_rate=args.learning_rate,
+    )
     logger.info(f"CIFAR-10 training and validation datasets created with sizes {len(cifar_train)} and {len(cifar_val)} respectively.")
 
 def main():
