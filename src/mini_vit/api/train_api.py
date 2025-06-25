@@ -41,7 +41,7 @@ def setup_parser():
     parser.add_argument(
         "--learning-rate",
         type=float,
-        default=0.001,
+        default=3e-4,
         help="Learning rate for the optimizer (default: 0.001)",
     )
 
@@ -76,7 +76,7 @@ def run_training(args):
     ff_dim=512,
     dropout=0.1,
     qkv_bias=True,
-    num_layers=8,
+    num_layers=6,
     num_classes=10,
     pool="cls"
 )

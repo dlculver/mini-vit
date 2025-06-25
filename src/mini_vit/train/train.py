@@ -2,6 +2,7 @@
 
 import torch
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, SequentialLR
 from typing import Optional
 
 import logging
@@ -33,7 +34,6 @@ def train_epoch(
     num_epochs: int,
     progress: Progress,
     epoch_task_id: TaskID,
-    scheduler=None,
 ) -> float:
     """A single training epoch."""
     model.train()
@@ -56,9 +56,7 @@ def train_epoch(
         optimizer.step()
 
         total_loss += loss.item()
-        if scheduler:
-            scheduler.step()
-            
+
         # Update batch progress
         progress.advance(batch_task_id)
 
@@ -76,7 +74,7 @@ def train(
     device: torch.device,
     epochs: int,
     learning_rate: float,
-    weight_decay: float = 0.01,
+    weight_decay: float = 0.05,
     scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
 ) -> None:
     """Full training loop."""
@@ -90,7 +88,25 @@ def train(
         eps=1e-8,
         weight_decay=weight_decay,
     )
+
+    # If a scheduler is provided, it will be used in the training loop
+    # TODO(dominic): For now I am using a cosine annealing scheduler, but this should be
+    # configurable in the future
+
+    # Warmup and cosine annealing scheduler
+    def warmup_lr(epoch):
+        if epoch < warmup_epochs:
+            return epoch / warmup_epochs  # Linear increase from 0 to 1
+        return 1.0
     
+    min_lr = 1e-6
+    warmup_epochs = max(1, epochs // 10)  # 10%
+
+    warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lr)
+    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=epochs - warmup_epochs, eta_min=min_lr)
+    scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epochs])
+    # scheduler = CosineAnnealingLR(optimizer, T_max=(epochs) * len(train_loader))
+
     # Create progress instance with custom columns
     progress = Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -117,8 +133,11 @@ def train(
                 num_epochs=epochs,
                 progress=progress,
                 epoch_task_id=epoch_task,
-                scheduler=scheduler,
             )
+
+            # Step the scheduler
+            if scheduler is not None:
+                scheduler.step()
             
             # Evaluate
             val_loss, val_acc = evaluate(
