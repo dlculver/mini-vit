@@ -380,8 +380,7 @@ class VisionTransformer(nn.Module):
         )
 
         self.transformer = TransformerEncoder(
-            d_in=embedding_dim,
-            d_out=embedding_dim,
+            embed_dim=embedding_dim,
             num_heads=num_heads,
             ff_dim=ff_dim,
             dropout=dropout,
