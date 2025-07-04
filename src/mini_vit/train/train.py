@@ -38,11 +38,10 @@ def train_epoch(
     """A single training epoch."""
     model.train()
     total_loss = 0.0
-    
+
     # Create a nested progress bar for batches
     batch_task_id = progress.add_task(
-        f"[cyan]Training Epoch {epoch + 1}/{num_epochs}",
-        total=len(dataloader)
+        f"[cyan]Training Epoch {epoch + 1}/{num_epochs}", total=len(dataloader)
     )
 
     for batch in dataloader:
@@ -98,13 +97,19 @@ def train(
         if epoch < warmup_epochs:
             return epoch / warmup_epochs  # Linear increase from 0 to 1
         return 1.0
-    
+
     min_lr = 1e-6
     warmup_epochs = max(1, epochs // 10)  # 10%
 
     warmup_scheduler = LambdaLR(optimizer, lr_lambda=warmup_lr)
-    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=epochs - warmup_epochs, eta_min=min_lr)
-    scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_epochs])
+    cosine_scheduler = CosineAnnealingLR(
+        optimizer, T_max=epochs - warmup_epochs, eta_min=min_lr
+    )
+    scheduler = SequentialLR(
+        optimizer,
+        schedulers=[warmup_scheduler, cosine_scheduler],
+        milestones=[warmup_epochs],
+    )
     # scheduler = CosineAnnealingLR(optimizer, T_max=(epochs) * len(train_loader))
 
     # Create progress instance with custom columns
@@ -113,14 +118,14 @@ def train(
         BarColumn(),
         TaskProgressColumn(),
         "[progress.percentage]{task.percentage:>3.0f}%",
-        expand=True
+        expand=True,
     )
-    
+
     logger.info("Starting training...")
     with progress:
         # Create main progress task for epochs
         epoch_task = progress.add_task("[green]Training Progress", total=epochs)
-        
+
         for epoch in range(epochs):
             # Train for one epoch
             train_loss = train_epoch(
@@ -138,19 +143,19 @@ def train(
             # Step the scheduler
             if scheduler is not None:
                 scheduler.step()
-            
+
             # Evaluate
             val_loss, val_acc = evaluate(
                 model=model,
                 device=device,
                 val_loader=val_loader,
                 criterion=criterion,
-                progress=progress
+                progress=progress,
             )
-            
+
             # Update main progress
             progress.advance(epoch_task)
-            
+
             # Log metrics
             logger.info(
                 f"Epoch {epoch + 1}/{epochs} - "
@@ -158,7 +163,7 @@ def train(
                 f"Val Loss: {val_loss:.4f}, "
                 f"Val Acc: {val_acc:.2f}%"
             )
-            
+
     logger.info("Training complete.")
 
 
@@ -188,14 +193,14 @@ def evaluate(
             preds = torch.argmax(outputs, dim=1)
             total += targets.size(0)
             correct += (preds == targets).sum().item()
-            
+
             # Update evaluation progress
             progress.advance(eval_task_id)
 
     avg_loss = total_loss / len(val_loader)
     accuracy = 100 * correct / total
-    
+
     # Clean up the evaluation progress bar
     progress.remove_task(eval_task_id)
-    
+
     return avg_loss, accuracy

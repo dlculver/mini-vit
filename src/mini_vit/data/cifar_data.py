@@ -31,17 +31,20 @@ TRANSFORMS = transforms.Compose(
     ]
 )
 
-TRAIN_TRANSFORMS = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-    transforms.AutoAugment(policy=transforms.AutoAugmentPolicy.CIFAR10),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        (0.4914009, 0.48215896, 0.4465308),
-        (0.24703279, 0.24348423, 0.26158753),
-    ),
-])
+TRAIN_TRANSFORMS = transforms.Compose(
+    [
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.AutoAugment(policy=transforms.AutoAugmentPolicy.CIFAR10),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            (0.4914009, 0.48215896, 0.4465308),
+            (0.24703279, 0.24348423, 0.26158753),
+        ),
+    ]
+)
+
 
 def get_cifar10_dataset(
     split: str = "train",
@@ -61,7 +64,7 @@ def get_cifar10_dataset(
         root="./cifar_data",
         train=(split == "train"),
         download=download,
-        transform=TRAIN_TRANSFORMS if split == "train" else TRANSFORMS
+        transform=TRAIN_TRANSFORMS if split == "train" else TRANSFORMS,
     )
     if download:
         logger.info("Data downloaded successfully")
