@@ -69,14 +69,14 @@ def run_training(args):
     # instantiate the model
     vit = VisionTransformer(
     in_channels=3,
-    patch_shape=(8, 8),
+    patch_shape=(4, 4),
     image_shape=(32, 32),
-    embedding_dim=256,
-    num_heads=8,
-    ff_dim=512,
+    embedding_dim=192,
+    num_heads=3,
+    ff_dim=768,
     dropout=0.1,
     qkv_bias=True,
-    num_layers=6,
+    num_layers=8,
     num_classes=10,
     pool="cls"
 )
