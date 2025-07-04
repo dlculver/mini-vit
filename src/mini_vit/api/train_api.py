@@ -170,14 +170,12 @@ def run_training(args):
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=0,
-        pin_memory=True,  # TODO(dominic): Is this something we need?
     )
     val_loader = DataLoader(
         cifar_val,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=0,
-        pin_memory=True,  # TODO(dominic): Is this something we need?
     )
 
     logger.info("Data loaders for training and validation created.")

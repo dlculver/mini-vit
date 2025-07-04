@@ -46,9 +46,9 @@ class PatchEmbedding(nn.Module):
                 p1=patch_height,
                 p2=patch_width,
             ),
-            nn.RMSNorm(normalized_shape=patch_dim, eps=1e-4),
+            nn.LayerNorm(normalized_shape=patch_dim, eps=1e-5),
             nn.Linear(patch_dim, projection_dim),
-            nn.RMSNorm(normalized_shape=projection_dim, eps=1e-4),
+            nn.LayerNorm(normalized_shape=projection_dim, eps=1e-5),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -213,8 +213,8 @@ class TransformerBlock(nn.Module):
             nn.Dropout(dropout),
         )
 
-        self.norm1 = nn.RMSNorm(normalized_shape=embed_dim, eps=1e-4)
-        self.norm2 = nn.RMSNorm(normalized_shape=embed_dim, eps=1e-4)
+        self.norm1 = nn.LayerNorm(normalized_shape=embed_dim, eps=1e-5)
+        self.norm2 = nn.LayerNorm(normalized_shape=embed_dim, eps=1e-5)
 
         self.dropout = nn.Dropout(dropout)
 
